@@ -222,7 +222,7 @@ export class SpotlightUtils {
     static getAccentColorCSS() {
         const rgb = '214, 166, 255';
         return `
-            :root {
+            :root, :host {
                 --spotlight-accent-color: rgb(${rgb});
                 --spotlight-accent-color-15: rgba(${rgb}, 0.15);
                 --spotlight-accent-color-20: rgba(${rgb}, 0.2);

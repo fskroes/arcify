@@ -17,10 +17,10 @@ import {
 import { isNavigatedAway, reconcileTabs } from './reconcile';
 import { useSidebarContext } from './state';
 import {
+  createDurableStore,
   loadArchivedTabs,
-  loadDurableState,
   saveArchivedTabs,
-  saveDurableState,
+  type DurableStore,
 } from './storage';
 import {
   favoriteItems,
@@ -78,6 +78,7 @@ export function SidebarController() {
   const pendingNewTabIds = useRef(new Set<number>());
   const temporaryInsertAfterByTabId = useRef(new Map<number, number>());
   const newTabPosition = useRef<'top' | 'bottom'>('bottom');
+  const durableStore = useRef<DurableStore | null>(null);
 
   useEffect(() => {
     void chrome.storage.sync.get(['sidebarSurfaceColor', 'newTabPosition']).then(result => {
@@ -153,10 +154,15 @@ export function SidebarController() {
 
   useEffect(() => {
     let cancelled = false;
+    const store = createDurableStore(durable => {
+      dispatch({ type: 'replaceDurable', durable });
+      void synchronizeTabs(durable);
+    });
+    durableStore.current = store;
     void (async () => {
       try {
         const [durable, tabs, archive] = await Promise.all([
-          loadDurableState(),
+          store.load(),
           queryCurrentWindowTabs(),
           loadArchivedTabs(),
         ]);
@@ -164,6 +170,7 @@ export function SidebarController() {
         const ownership = reconcileTabs(durable, tabs, {});
         liveOwnership.current = ownership.itemIdByTabId;
         dispatch({ type: 'initialized', durable, tabs, ...ownership });
+        store.ready();
         setArchivedTabs(archive);
         await replacePinnedBindings(
           ownership.itemIdByTabId,
@@ -179,12 +186,14 @@ export function SidebarController() {
     })();
     return () => {
       cancelled = true;
+      store.dispose();
+      if (durableStore.current === store) durableStore.current = null;
     };
-  }, [dispatch]);
+  }, [dispatch, synchronizeTabs]);
 
   useEffect(() => {
     if (state.status !== 'ready') return;
-    void saveDurableState(state.durable);
+    void durableStore.current?.save(state.durable);
   }, [state.durable, state.status]);
 
   useEffect(() => {
