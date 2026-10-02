@@ -16,6 +16,7 @@ import { Utils } from './utils.js';
 import { SearchEngine } from './spotlight/shared/search-engine.js';
 import { BackgroundDataProvider } from './spotlight/shared/data-providers/background-data-provider.js';
 import { Logger } from './logger.js';
+import { reconcileTabs } from './src/sidebar/reconcile.ts';
 
 // Enum for spotlight tab modes
 const SpotlightTabMode = {
@@ -655,38 +656,40 @@ async function copyCurrentTabUrlWithFallback() {
 
         // PRIMARY: Script injection approach (universal, no permission popups)
         try {
-            await chrome.scripting.executeScript({
+            const results = await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
+                // Chrome serializes this function and runs it in the page, so it
+                // must not use any identifier from this module (such as Logger).
                 func: (url) => {
-                    // This function runs in webpage context but avoids permission issues
-                    // by being injected from extension context
-                    navigator.clipboard.writeText(url).then(() => {
-                        Logger.log(`[URLCopy] Script injection succeeded: ${url}`);
-                    }).catch(err => {
-                        Logger.error("[URLCopy] Script injection clipboard failed:", err);
-                        // Fallback to older method if clipboard API fails
-                        const textarea = document.createElement('textarea');
-                        textarea.value = url;
-                        document.body.appendChild(textarea);
-                        textarea.select();
-                        document.execCommand('copy');
-                        document.body.removeChild(textarea);
-                        Logger.log(`[URLCopy] Fallback copy succeeded: ${url}`);
-                    });
+                    const copyWithExecCommand = () => {
+                        try {
+                            const textarea = document.createElement('textarea');
+                            textarea.value = url;
+                            document.body.appendChild(textarea);
+                            textarea.select();
+                            const copied = document.execCommand('copy');
+                            document.body.removeChild(textarea);
+                            return copied;
+                        } catch {
+                            return false;
+                        }
+                    };
+                    try {
+                        return navigator.clipboard.writeText(url)
+                            .then(() => true)
+                            .catch(copyWithExecCommand);
+                    } catch {
+                        return copyWithExecCommand();
+                    }
                 },
                 args: [tab.url]
             });
 
-            Logger.log(`[URLCopy] Script injection completed for: ${tab.url}`);
-
-            // Notify sidebar of successful URL copy
-            try {
-                chrome.runtime.sendMessage({ action: "urlCopySuccess" });
-                Logger.log("[URLCopy] Success message sent to sidebar");
-            } catch (notifyError) {
-                Logger.log("[URLCopy] Could not notify sidebar:", notifyError);
+            if (results?.[0]?.result === true) {
+                Logger.log(`[URLCopy] Copied URL: ${tab.url}`);
+            } else {
+                Logger.error(`[URLCopy] Page could not copy URL: ${tab.url}`);
             }
-
             return;
 
         } catch (injectionError) {
@@ -803,8 +806,37 @@ async function runAutoArchiveCheck() {
             }
         });
 
-        // Get all non-pinned tabs across all windows
-        const tabs = await chrome.tabs.query({ pinned: false });
+        // Keep every tab that the sidebar treats as an Arcify pinned tab. The sidebar
+        // binds per window, so run its own rule per window, with the stored bindings
+        // (they keep a pinned tab after the user navigated away from the pinned URL).
+        // URL recovery is on for every window, because the background cannot see which
+        // windows have an open sidebar (side panel contexts report windowId -1). So this
+        // can keep one temporary tab per pinned item and window (a unique origin+path
+        // match). Keeping a tab is safer than closing a pinned one.
+        // Stored bindings can be stale (tab IDs restart with the browser) and then claim
+        // an item before its real tab. So also keep what the sidebar's init rule binds
+        // (no stored bindings, Controller.tsx), and keep the union of both.
+        const storedBindings = Object.fromEntries(
+            Object.entries(await Utils.getPinnedTabStates())
+                .filter(([, state]) => state?.pinnedItemId)
+                .map(([tabId, state]) => [tabId, state.pinnedItemId])
+        );
+        const allTabs = await chrome.tabs.query({});
+        const tabsByWindow = new Map();
+        for (const tab of allTabs) {
+            // Same URL fallback as the sidebar's toSnapshot in src/sidebar/chromeGateway.ts.
+            const snapshot = { ...tab, url: tab.url || tab.pendingUrl || `about:blank#arcify-tab-${tab.id}` };
+            tabsByWindow.set(tab.windowId, [...(tabsByWindow.get(tab.windowId) || []), snapshot]);
+        }
+        const pinnedTabIds = new Set();
+        for (const windowTabs of tabsByWindow.values()) {
+            for (const bindings of [storedBindings, {}]) {
+                const { itemIdByTabId } = reconcileTabs(sidebarState, windowTabs, bindings);
+                Object.keys(itemIdByTabId).forEach(tabId => pinnedTabIds.add(Number(tabId)));
+            }
+        }
+
+        const tabs = allTabs.filter(tab => !tab.pinned);
         const tabsToArchive = [];
 
         for (const tab of tabs) {
@@ -814,7 +846,7 @@ async function runAutoArchiveCheck() {
                 continue;
             }
 
-            if (bookmarkedUrls.has(tab.url)) {
+            if (bookmarkedUrls.has(tab.url) || pinnedTabIds.has(tab.id)) {
                 // Optionally update activity for bookmarked tabs so they don't get checked repeatedly
                 await updateTabLastActivity(tab.id);
                 continue;

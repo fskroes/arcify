@@ -21,6 +21,10 @@ Notable changes:
 - Keyboard shortcuts for quick access
 - Clean, minimal interface
 
+### Privacy
+
+Spotlight sends each query to Google (`clients1.google.com`) to show search suggestions, also when your default search engine is not Google. Turn off **Google search suggestions** in the options to keep queries on your device.
+
 ## Development Setup
 
 ### Prerequisites
@@ -98,6 +102,7 @@ Notable changes:
 - `pnpm run clean` - Remove all build artifacts
 - `pnpm run preview` - Preview the built extension
 - `pnpm run info` - Display build information and status
+- `pnpm test` - Run the unit tests (Vitest, with a fake `chrome` API)
 
 ### Release Process
 

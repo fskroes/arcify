@@ -28,9 +28,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck and package extension
+      - name: Typecheck, test and package extension
         run: |
           pnpm run typecheck
+          pnpm test
           pnpm run build:zip
 
       - name: Verify build artifacts

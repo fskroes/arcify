@@ -22,10 +22,14 @@ import {
 } from './shared/spotlight-controller.js';
 import { Logger } from '../logger.js';
 
+// The Spotlight UI lives in a closed shadow root, so page scripts cannot read
+// the open tabs, bookmarks and history that it shows.
+const SPOTLIGHT_HOST_ID = 'arcify-spotlight-host';
+let spotlightDialog = null;
+
 // Reinjection after an extension reload must not invoke handlers from the old,
 // invalidated content-script context.
-document.getElementById('arcify-spotlight-dialog')?.remove();
-document.getElementById('arcify-spotlight-styles')?.remove();
+document.getElementById(SPOTLIGHT_HOST_ID)?.remove();
 
 const pinnedNavigationGuard = window.arcifyPinnedNavigationGuard || {
     enabled: false,
@@ -186,14 +190,14 @@ syncPinnedNavigationGuardState();
 async function activateSpotlight(spotlightTabMode = 'current-tab') {
 
     // Handle toggle functionality for existing spotlight
-    const existingDialog = document.getElementById('arcify-spotlight-dialog');
+    const existingDialog = spotlightDialog?.isConnected ? spotlightDialog : null;
     if (existingDialog) {
         if (existingDialog.open) {
             existingDialog.close();
             return;
         }
-        existingDialog.remove();
-        document.getElementById('arcify-spotlight-styles')?.remove();
+        document.getElementById(SPOTLIGHT_HOST_ID)?.remove();
+        spotlightDialog = null;
         window.arcifySpotlightInjected = false;
         window.arcifySpotlightRelayKey = null;
     }
@@ -206,7 +210,7 @@ async function activateSpotlight(spotlightTabMode = 'current-tab') {
         ${accentColorDefinitions}
         
         /* Smooth transitions for color changes */
-        :root {
+        :host {
             transition: --spotlight-accent-color 0.3s ease,
                        --spotlight-accent-color-15 0.3s ease,
                        --spotlight-accent-color-20 0.3s ease,
@@ -438,11 +442,22 @@ async function activateSpotlight(spotlightTabMode = 'current-tab') {
         }
     `;
 
-    // Create and inject styles
+    const host = document.createElement('div');
+    host.id = SPOTLIGHT_HOST_ID;
+    const shadowRoot = host.attachShadow({ mode: 'closed' });
+    // Outside the shadow root these events target the host div, not an input, so
+    // site shortcut and paste handlers would act on them. Spotlight's own handlers
+    // inside the shadow root have already run when the event reaches the host.
+    for (const type of [
+        'keydown', 'keypress', 'keyup', 'beforeinput', 'input',
+        'paste', 'copy', 'cut', 'compositionstart', 'compositionupdate', 'compositionend'
+    ]) {
+        host.addEventListener(type, event => event.stopPropagation());
+    }
+
     const styleSheet = document.createElement('style');
-    styleSheet.id = 'arcify-spotlight-styles';
     styleSheet.textContent = spotlightCSS;
-    document.head.appendChild(styleSheet);
+    shadowRoot.appendChild(styleSheet);
 
     // Create spotlight dialog
     const dialog = document.createElement('dialog');
@@ -454,7 +469,9 @@ async function activateSpotlight(spotlightTabMode = 'current-tab') {
         </div>
     `;
 
-    document.body.appendChild(dialog);
+    shadowRoot.appendChild(dialog);
+    document.body.appendChild(host);
+    spotlightDialog = dialog;
     const mode = spotlightTabMode === SpotlightTabMode.NEW_TAB
         ? SpotlightTabMode.NEW_TAB
         : SpotlightTabMode.CURRENT_TAB;
@@ -470,8 +487,8 @@ async function activateSpotlight(spotlightTabMode = 'current-tab') {
         removeGlobalCloseListener();
         if (dialog.open) dialog.close();
         SpotlightMessageClient.notifyClosed();
-        dialog.remove();
-        styleSheet.remove();
+        host.remove();
+        if (spotlightDialog === dialog) spotlightDialog = null;
         window.arcifySpotlightInjected = false;
     }
 
@@ -486,8 +503,7 @@ async function activateSpotlight(spotlightTabMode = 'current-tab') {
 
     // Listen for global close messages from background script
     removeGlobalCloseListener = SpotlightMessageClient.setupGlobalCloseListener(() => {
-        const existingDialog = document.getElementById('arcify-spotlight-dialog');
-        if (existingDialog && existingDialog.open) {
+        if (dialog.isConnected && dialog.open) {
             closeSpotlight();
         }
     });

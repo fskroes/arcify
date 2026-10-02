@@ -103,6 +103,8 @@ export class BackgroundDataProvider extends BaseDataProvider {
 
     async getAutocompleteData(query) {
         try {
+            const { enableSearchSuggestions } = await Utils.getSettings();
+            if (!enableSearchSuggestions) return [];
             return await this.autocompleteProvider.getAutocompleteSuggestions(query);
         } catch (error) {
             Logger.error('[BackgroundDataProvider] Error getting autocomplete data:', error);

@@ -57,6 +57,7 @@ async function saveOptions() {
     autoArchiveEnabled: getCheckboxValue(document.getElementById('autoArchiveEnabled'), false),
     autoArchiveIdleMinutes: parseInt(autoArchiveIdleMinutesInput?.value, 10) || 360,
     enableSpotlight: getCheckboxValue(document.getElementById('enableSpotlight'), true),
+    enableSearchSuggestions: getCheckboxValue(document.getElementById('enableSearchSuggestions'), true),
     showAllOpenTabsInCollapsedFolders: getCheckboxValue(document.getElementById('showAllOpenTabsInCollapsedFolders'), false),
     sidebarSurfaceColor:
       document.getElementById('sidebarSurfaceColor')?.value ||
@@ -98,6 +99,7 @@ async function restoreOptions() {
   // Restore checkbox values
   setCheckboxValue(document.getElementById('autoArchiveEnabled'), settings.autoArchiveEnabled, false);
   setCheckboxValue(document.getElementById('enableSpotlight'), settings.enableSpotlight, true);
+  setCheckboxValue(document.getElementById('enableSearchSuggestions'), settings.enableSearchSuggestions, true);
   setCheckboxValue(document.getElementById('showAllOpenTabsInCollapsedFolders'), settings.showAllOpenTabsInCollapsedFolders, false);
   setCheckboxValue(document.getElementById('debugLoggingEnabled'), settings.debugLoggingEnabled, false);
 
@@ -151,7 +153,7 @@ function debouncedSave() {
 // Function to setup auto-save listeners
 function setupAutoSave() {
   // Auto-save for checkboxes (most just save immediately)
-  const checkboxIds = ['enableSpotlight', 'showAllOpenTabsInCollapsedFolders', 'debugLoggingEnabled'];
+  const checkboxIds = ['enableSpotlight', 'enableSearchSuggestions', 'showAllOpenTabsInCollapsedFolders', 'debugLoggingEnabled'];
   checkboxIds.forEach(id => addListenerIfExists(id, 'change', saveOptions));
 
   // Auto-archive checkbox needs special handling to update visibility

@@ -47,17 +47,10 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "onboarding.js",
-        "installation-onboarding.js",
-        "assets/*",
-        "_favicon/*",
-        "spotlight/shared/*"
+        "_favicon/*"
       ],
       "matches": [
         "<all_urls>"
-      ],
-      "extension_ids": [
-        "*"
       ]
     }
   ],
